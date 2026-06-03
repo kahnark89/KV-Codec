@@ -3,7 +3,6 @@ Integration tests — load opt-125m and run the full pipeline.
 Skipped unless -m slow is passed (or no marker filter).
 """
 import pytest
-import torch
 
 from kvcodec import KVSystem, KVDetector, SeqCodec, SeqCodecConfig
 
@@ -16,16 +15,10 @@ TEST_TEXT  = (
 
 
 def _extract_kv(model, tok, text, max_len=128):
-    enc = tok(text, return_tensors="pt", max_length=max_len, truncation=True)
-    with torch.no_grad():
-        out = model(enc["input_ids"], use_cache=True)
-    pkv = out.past_key_values
-    if hasattr(pkv, "key_cache"):
-        kl = [pkv.key_cache[l].squeeze(0).cpu().float()   for l in range(len(pkv.key_cache))]
-        vl = [pkv.value_cache[l].squeeze(0).cpu().float() for l in range(len(pkv.value_cache))]
-    else:
-        kl = [pkv[l][0].squeeze(0).cpu().float() for l in range(len(pkv))]
-        vl = [pkv[l][1].squeeze(0).cpu().float() for l in range(len(pkv))]
+    # Reuse the production extractor so the test exercises the same code path
+    # and handles every supported cache format (DynamicCache, legacy tuple, etc.).
+    system = KVSystem(model, tok, device="cpu", verbose=False)
+    kl, vl, _ = system.extract_kv(text, max_seq_len=max_len)
     return kl, vl
 
 
