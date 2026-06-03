@@ -133,14 +133,17 @@ class TestJointCodec:
 
 class TestCompressibilityProfile:
     def _make_profile(self, layer_sim, seq_sim, joint_sim=None):
+        joint = joint_sim if joint_sim is not None else layer_sim * seq_sim
         return CompressibilityProfile(
             layer_sim_adj=layer_sim,
+            layer_sim_mid=layer_sim * 0.8,
+            layer_sim_decay=0.1,
             seq_sim_adj=seq_sim,
             seq_sim_8=seq_sim * 0.8,
-            joint_sim_gain=joint_sim or 0.0,
-            joint_bonus=max(0.0, (joint_sim or 0.0) - layer_sim),
+            seq_sim_global=seq_sim * 0.5,
+            joint_sim=joint,
+            joint_bonus=joint - layer_sim * seq_sim,
             n_layers=12, n_heads=4, head_dim=32, seq_len_measured=64,
-            layer_decay_rate=0.1,
         )
 
     def test_strategy_none(self):
