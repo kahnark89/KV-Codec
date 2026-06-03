@@ -23,6 +23,9 @@ dev = [
 [project.scripts]
 kvcodec-benchmark = "benchmark_throughput:run"
 
+[tool.setuptools]
+py-modules = ["benchmark_throughput"]
+
 [tool.setuptools.packages.find]
 include = ["kvcodec*"]
 
