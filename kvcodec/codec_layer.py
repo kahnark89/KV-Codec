@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .config import LayerCodecConfig
+from ._residual import _clip_per_vector
 
 
 @dataclass
@@ -132,9 +133,10 @@ class LayerCodec:
             res_k = k_stack - anchor_exp_k
             res_v = v_stack - anchor_exp_v
 
-        for res in [res_k, res_v]:
-            std = res.std().clamp(min=1e-6)
-            res.clamp_(-3.0 * std, 3.0 * std)
+        # Per-vector outlier clip (see _clip_per_vector): scales the threshold
+        # to each vector's own spread so high-energy layers aren't truncated.
+        res_k = _clip_per_vector(res_k, self.cfg.max_residual_clip)
+        res_v = _clip_per_vector(res_v, self.cfg.max_residual_clip)
 
         res_k_q, scales_k = self._quantize(res_k)
         res_v_q, scales_v = self._quantize(res_v)

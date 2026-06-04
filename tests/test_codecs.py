@@ -162,6 +162,15 @@ class TestCompressibilityProfile:
         p = self._make_profile(layer_sim=0.8, seq_sim=0.6, joint_sim=0.9)
         assert p.strategy == CodecStrategy.JOINT_2D
 
+    def test_strategy_separable_axes_pick_single(self):
+        # Both axes individually compressible, but joint_sim equals the product
+        # of the 1D sims → no coupling bonus → the better single axis wins,
+        # not the heavier JOINT_2D codec.
+        p = self._make_profile(layer_sim=0.8, seq_sim=0.6, joint_sim=0.8 * 0.6)
+        assert p.joint_coupling is False
+        assert p.strategy != CodecStrategy.JOINT_2D
+        assert p.strategy in (CodecStrategy.SEQ_ONLY, CodecStrategy.LAYER_ONLY)
+
     def test_compression_ratio_gt1_when_compressible(self):
         p = self._make_profile(layer_sim=0.8, seq_sim=0.6)
         assert p.estimated_compression_ratio() > 1.0

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .config import SeqCodecConfig
+from ._residual import _clip_per_vector
 
 
 @dataclass
@@ -118,11 +119,12 @@ class SeqCodec:
             res_k = k - anchor_exp_k
             res_v = v - anchor_exp_v
 
-        # Clip before quantization
-        for res in [res_k, res_v]:
-            std = res.std().clamp(min=1e-6)
-            res.clamp_(-self.cfg.max_residual_clip * std,
-                        self.cfg.max_residual_clip * std)
+        # Per-vector outlier clip before quantization. The threshold scales
+        # with each vector's own spread (std along head_dim) rather than a
+        # single global std, so high-energy vectors aren't truncated — a global
+        # clamp destroys their signal and biases the per-vector quantizer.
+        res_k = _clip_per_vector(res_k, self.cfg.max_residual_clip)
+        res_v = _clip_per_vector(res_v, self.cfg.max_residual_clip)
 
         res_k_q, scales_k = self._quantize(res_k)
         res_v_q, scales_v = self._quantize(res_v)
