@@ -55,13 +55,27 @@ class CompressibilityProfile:
         layer_ok = self.layer_sim_adj >= LAYER_AXIS_THRESHOLD
         seq_ok   = self.seq_sim_adj   >= SEQ_AXIS_THRESHOLD
         if layer_ok and seq_ok:
-            return CodecStrategy.JOINT_2D
+            # Both axes are individually compressible, but the heavier 2D
+            # codec only pays off when the axes are genuinely *coupled* —
+            # i.e. the off-diagonal (Δlayer=1, Δpos=1) similarity beats the
+            # product of the two 1D similarities by JOINT_BONUS_THRESHOLD.
+            # If they are separable, the better single axis wins.
+            if self.joint_coupling:
+                return CodecStrategy.JOINT_2D
+            return self._better_single_axis()
         elif seq_ok:
             return CodecStrategy.SEQ_ONLY
         elif layer_ok:
             return CodecStrategy.LAYER_ONLY
         else:
             return CodecStrategy.NONE
+
+    def _better_single_axis(self) -> CodecStrategy:
+        """Pick the single-axis strategy with the higher estimated 1D ratio."""
+        seq_ratio   = 2.0 + self.seq_sim_adj   * 4.0
+        layer_ratio = 2.0 + self.layer_sim_adj * 3.0
+        return (CodecStrategy.SEQ_ONLY if seq_ratio >= layer_ratio
+                else CodecStrategy.LAYER_ONLY)
 
     @property
     def layer_compressible(self) -> bool:
@@ -133,6 +147,7 @@ class LayerCodecConfig:
     quantize_bits: int = 8
     normalize_residuals: bool = True
     use_predictor: bool = False
+    max_residual_clip: float = 3.0
 
 
 @dataclass
@@ -144,3 +159,4 @@ class JointCodecConfig:
     normalize_residuals: bool = True
     use_predictor: bool = False
     coupling_mode: str = "product"    # "product" | "learned"
+    max_residual_clip: float = 3.0

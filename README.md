@@ -141,7 +141,7 @@ codec = select_codec(profile)     # returns the right codec, pre-configured
 
 | Parameter | Default | Description |
 |---|---|---|
-| `anchor_stride` | 8 | Token positions between seq anchors |
+| `anchor_stride` | 16 | Token positions between seq anchors |
 | `layer_anchor_stride` | 4 | Layers between layer anchors |
 | `quantize_bits` | 8 | Residual quantization bits |
 | `normalize_residuals` | True | L2-normalize before residual computation |
@@ -159,7 +159,7 @@ Global thresholds (in `kvcodec/config.py`):
 
 ```bash
 # Fast unit tests (no model required, ~seconds)
-pytest tests/
+pytest tests/ -m "not slow"
 
 # Include integration tests (downloads opt-125m, ~minutes)
 pytest tests/ -m slow

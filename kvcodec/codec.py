@@ -17,6 +17,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict
 
+from ._residual import _clip_per_vector
+
 
 @dataclass
 class CodecConfig:
@@ -194,10 +196,10 @@ class KVCodec:
             residuals_k_raw = k - anchor_expanded_k  # [T, H, D]
             residuals_v_raw = v - anchor_expanded_v
 
-        # Clip outliers before quantization
-        for res in [residuals_k_raw, residuals_v_raw]:
-            std = res.std()
-            res.clamp_(-cfg.max_residual_clip * std, cfg.max_residual_clip * std)
+        # Per-vector outlier clip before quantization (see _clip_per_vector):
+        # threshold scales with each vector's own spread, not a global std.
+        residuals_k_raw = _clip_per_vector(residuals_k_raw, cfg.max_residual_clip)
+        residuals_v_raw = _clip_per_vector(residuals_v_raw, cfg.max_residual_clip)
 
         # Quantize residuals
         residuals_k_q, scales_k = self._quantize_int8(residuals_k_raw)

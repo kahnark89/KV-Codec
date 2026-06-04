@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .config import JointCodecConfig
+from ._residual import _clip_per_vector
 
 
 @dataclass
@@ -55,7 +56,7 @@ class CompressedJoint:
             (self.anchors_k.numel() + self.anchors_v.numel()) * 2 +
             (self.residuals_k.numel() + self.residuals_v.numel()) * 1 +
             (self.scales_k.numel() + self.scales_v.numel()) * 4 +
-            (self.layer_anchor_map.numel() + self.pos_anchor_map.numel()) * 4
+            (self.layer_anchor_map.numel() + self.pos_anchor_map.numel()) * 8  # int64
         )
 
     def bytes_original(self) -> int:
@@ -157,9 +158,11 @@ class JointCodec:
             res_k = k - anchor_exp_k   # [L, T, H, D]
             res_v = v - anchor_exp_v
 
-        for res in [res_k, res_v]:
-            std = res.std().clamp(min=1e-6)
-            res.clamp_(-3.0 * std, 3.0 * std)
+        # Per-vector outlier clip (see _clip_per_vector): scales the threshold
+        # to each vector's own spread so high-energy (layer, pos) cells aren't
+        # truncated by a single global std.
+        res_k = _clip_per_vector(res_k, self.cfg.max_residual_clip)
+        res_v = _clip_per_vector(res_v, self.cfg.max_residual_clip)
 
         res_k_q, scales_k = self._quantize(res_k)
         res_v_q, scales_v = self._quantize(res_v)
@@ -233,6 +236,7 @@ class JointCodec:
             cos_v += F.cosine_similarity(v_o.reshape(-1,D), v_r.reshape(-1,D), dim=-1).mean().item()
             mse_k += F.mse_loss(k_r, k_o).item()
             mse_v += F.mse_loss(v_r, v_o).item()
+        cr = c.compression_ratio()
         return {
             'strategy':            'joint_2d',
             'seq_anchor_stride':   self.cfg.seq_anchor_stride,
@@ -241,7 +245,7 @@ class JointCodec:
             'cosine_sim_v':        cos_v / n,
             'mse_k':               mse_k / n,
             'mse_v':               mse_v / n,
-            'compression_ratio':   c.compression_ratio(),
-            'bytes_saved_pct':     (1 - 1/c.compression_ratio()) * 100,
+            'compression_ratio':   cr,
+            'bytes_saved_pct':     (1 - 1/cr) * 100 if cr > 0 else 0.0,
             'predictor_used':      c.predictor_used,
         }

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .config import SeqCodecConfig
+from ._residual import _clip_per_vector
 
 
 @dataclass
@@ -38,7 +39,7 @@ class CompressedSeqLayer:
             (self.anchors_k.numel() + self.anchors_v.numel()) * 2 +   # fp16
             (self.residuals_k.numel() + self.residuals_v.numel()) * 1 + # int8
             (self.scales_k.numel() + self.scales_v.numel()) * 4 +      # fp32
-            self.anchor_map.numel() * 4                                  # int64
+            self.anchor_map.numel() * 8                                  # int64
         )
 
     def bytes_original(self) -> int:
@@ -118,11 +119,12 @@ class SeqCodec:
             res_k = k - anchor_exp_k
             res_v = v - anchor_exp_v
 
-        # Clip before quantization
-        for res in [res_k, res_v]:
-            std = res.std().clamp(min=1e-6)
-            res.clamp_(-self.cfg.max_residual_clip * std,
-                        self.cfg.max_residual_clip * std)
+        # Per-vector outlier clip before quantization. The threshold scales
+        # with each vector's own spread (std along head_dim) rather than a
+        # single global std, so high-energy vectors aren't truncated — a global
+        # clamp destroys their signal and biases the per-vector quantizer.
+        res_k = _clip_per_vector(res_k, self.cfg.max_residual_clip)
+        res_v = _clip_per_vector(res_v, self.cfg.max_residual_clip)
 
         res_k_q, scales_k = self._quantize(res_k)
         res_v_q, scales_v = self._quantize(res_v)
@@ -178,6 +180,7 @@ class SeqCodec:
         k_o = keys_orig.float();  v_o = values_orig.float()
         k_r = k_rec.float();      v_r = v_rec.float()
         D = c.head_dim
+        cr = c.compression_ratio()
         return {
             'strategy':          'seq_only',
             'anchor_stride':     self.cfg.anchor_stride,
@@ -185,7 +188,7 @@ class SeqCodec:
             'cosine_sim_v':      F.cosine_similarity(v_o.reshape(-1,D), v_r.reshape(-1,D), dim=-1).mean().item(),
             'mse_k':             F.mse_loss(k_r, k_o).item(),
             'mse_v':             F.mse_loss(v_r, v_o).item(),
-            'compression_ratio': c.compression_ratio(),
-            'bytes_saved_pct':   (1 - 1/c.compression_ratio()) * 100,
+            'compression_ratio': cr,
+            'bytes_saved_pct':   (1 - 1/cr) * 100 if cr > 0 else 0.0,
             'predictor_used':    c.predictor_used,
         }

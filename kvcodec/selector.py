@@ -113,6 +113,42 @@ def select_codec(
     return None
 
 
+def compress_cache(codec, all_keys, all_values, predictor=None):
+    """
+    Compress a full per-layer KV cache with any codec, hiding the
+    per-codec input contract.
+
+    SeqCodec operates on a single layer ([H, T, D]) at a time, so it is
+    applied per layer and returns a *list* of compressed layers. LayerCodec
+    and JointCodec consume the whole layer stack and return a single object.
+
+    Returns (compressed, metrics) where ``metrics`` is a single averaged dict.
+    """
+    if isinstance(codec, SeqCodec):
+        comps = [codec.compress(k, v, predictor)
+                 for k, v in zip(all_keys, all_values)]
+        ms = [codec.metrics(k, v, c, predictor)
+              for k, v, c in zip(all_keys, all_values, comps)]
+        return comps, _avg_metrics(ms)
+    compressed = codec.compress(all_keys, all_values, predictor)
+    return compressed, codec.metrics(all_keys, all_values, compressed, predictor)
+
+
+def decompress_cache(codec, compressed, predictor=None):
+    """
+    Inverse of :func:`compress_cache`. Returns (all_keys, all_values) lists
+    of per-layer [H, T, D] tensors regardless of codec type.
+    """
+    if isinstance(codec, SeqCodec):
+        ks, vs = [], []
+        for c in compressed:
+            k, v = codec.decompress(c, predictor)
+            ks.append(k)
+            vs.append(v)
+        return ks, vs
+    return codec.decompress(compressed, predictor)
+
+
 def sweep_strategies(
     profile: CompressibilityProfile,
     all_keys,
