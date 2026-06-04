@@ -19,7 +19,8 @@ from .detector   import KVDetector
 from .codec_seq  import SeqCodec, CompressedSeqLayer
 from .codec_layer import LayerCodec, CompressedLayerStack
 from .codec_joint import JointCodec, CompressedJoint
-from .selector   import select_codec, sweep_strategies
+from .selector   import (select_codec, sweep_strategies,
+                          compress_cache, decompress_cache)
 from .predictor  import KVPredictor, PredictorTrainer
 from .system     import KVSystem
 
@@ -29,6 +30,7 @@ __all__ = [
     'SeqCodec', 'LayerCodec', 'JointCodec',
     'KVPredictor', 'PredictorTrainer',
     'select_codec', 'sweep_strategies',
+    'compress_cache', 'decompress_cache',
     'CodecStrategy', 'CompressibilityProfile',
     'SeqCodecConfig', 'LayerCodecConfig', 'JointCodecConfig',
 ]

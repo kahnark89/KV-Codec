@@ -19,7 +19,8 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from kvcodec import KVSystem
-from kvcodec.selector import select_codec, sweep_strategies
+from kvcodec.selector import (select_codec, sweep_strategies,
+                              compress_cache, decompress_cache)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -37,6 +38,11 @@ def _reset_mem():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
+
+def _sync():
+    """Block until queued CUDA work finishes so wall-clock timing is accurate."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 def _kv_bytes(past_key_values) -> int:
     """Return total bytes across all KV tensors regardless of cache format."""
@@ -94,8 +100,10 @@ def run(
     gen_times = []
     mem_peaks = []
 
+    gen_tokens = max_new_tokens
     for i in range(n_runs):
         _reset_mem()
+        _sync()
         t0 = time.perf_counter()
         with torch.no_grad():
             out = model.generate(
@@ -104,13 +112,16 @@ def run(
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
+        _sync()
         t1 = time.perf_counter()
         gen_times.append(t1 - t0)
         mem_peaks.append(_peak_mem_gb())
+        # Greedy decoding may stop early on EOS — count tokens actually produced.
+        gen_tokens = out.shape[1] - prompt_tokens
 
     avg_time   = sum(gen_times) / n_runs
     avg_mem_gb = sum(mem_peaks) / n_runs
-    tps        = max_new_tokens / avg_time
+    tps        = gen_tokens / avg_time if avg_time > 0 else 0.0
 
     print(f"  Avg generation time : {avg_time*1000:.1f} ms")
     print(f"  Throughput          : {tps:.1f} tokens/sec")
@@ -184,26 +195,31 @@ def run(
 
     all_keys, all_values, _ = system.extract_kv(prompt, max_seq_len=kv_seq_len)
 
-    if best is None:
+    codec = None if best is None else select_codec(profile)
+
+    if codec is None:
         print("  Skipped — no viable codec found.")
         compress_ms = decompress_ms = 0.0
     else:
-        codec = select_codec(profile)
-
-        # Warm-up
-        _ = codec.compress(all_keys, all_values) if hasattr(codec, 'compress') else None
+        # Warm-up (compress_cache hides each codec's per-layer vs. whole-stack
+        # input contract).
+        compressed, _ = compress_cache(codec, all_keys, all_values)
 
         # Time compress
         OVERHEAD_RUNS = 10
+        _sync()
         t0 = time.perf_counter()
         for _ in range(OVERHEAD_RUNS):
-            compressed = codec.compress(all_keys, all_values)
+            compressed, _ = compress_cache(codec, all_keys, all_values)
+        _sync()
         compress_ms = (time.perf_counter() - t0) / OVERHEAD_RUNS * 1000
 
         # Time decompress
+        _sync()
         t0 = time.perf_counter()
         for _ in range(OVERHEAD_RUNS):
-            _ = codec.decompress(compressed)
+            _ = decompress_cache(codec, compressed)
+        _sync()
         decompress_ms = (time.perf_counter() - t0) / OVERHEAD_RUNS * 1000
 
         total_overhead_ms = compress_ms + decompress_ms

@@ -38,7 +38,7 @@ class CompressedSeqLayer:
             (self.anchors_k.numel() + self.anchors_v.numel()) * 2 +   # fp16
             (self.residuals_k.numel() + self.residuals_v.numel()) * 1 + # int8
             (self.scales_k.numel() + self.scales_v.numel()) * 4 +      # fp32
-            self.anchor_map.numel() * 4                                  # int64
+            self.anchor_map.numel() * 8                                  # int64
         )
 
     def bytes_original(self) -> int:
@@ -178,6 +178,7 @@ class SeqCodec:
         k_o = keys_orig.float();  v_o = values_orig.float()
         k_r = k_rec.float();      v_r = v_rec.float()
         D = c.head_dim
+        cr = c.compression_ratio()
         return {
             'strategy':          'seq_only',
             'anchor_stride':     self.cfg.anchor_stride,
@@ -185,7 +186,7 @@ class SeqCodec:
             'cosine_sim_v':      F.cosine_similarity(v_o.reshape(-1,D), v_r.reshape(-1,D), dim=-1).mean().item(),
             'mse_k':             F.mse_loss(k_r, k_o).item(),
             'mse_v':             F.mse_loss(v_r, v_o).item(),
-            'compression_ratio': c.compression_ratio(),
-            'bytes_saved_pct':   (1 - 1/c.compression_ratio()) * 100,
+            'compression_ratio': cr,
+            'bytes_saved_pct':   (1 - 1/cr) * 100 if cr > 0 else 0.0,
             'predictor_used':    c.predictor_used,
         }

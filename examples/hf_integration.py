@@ -8,7 +8,7 @@ apply the best codec to the captured cache.
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from kvcodec import KVSystem
-from kvcodec.selector import select_codec
+from kvcodec.selector import select_codec, compress_cache, decompress_cache
 
 MODEL_ID = "facebook/opt-125m"
 PROMPT   = "Transformer models store key-value states for each attention layer."
@@ -35,9 +35,10 @@ codec = select_codec(profile)
 if codec is None:
     print("No compression beneficial for this model.")
 else:
-    compressed   = codec.compress(all_keys, all_values)
-    metrics      = codec.metrics(all_keys, all_values, compressed)
-    k_rec, v_rec = codec.decompress(compressed)
+    # compress_cache handles every codec's input contract — SeqCodec runs
+    # per-layer, Layer/Joint codecs run on the whole stack.
+    compressed, metrics = compress_cache(codec, all_keys, all_values)
+    k_rec, v_rec        = decompress_cache(codec, compressed)
 
     print(f"Compression ratio : {metrics['compression_ratio']:.2f}x")
     print(f"Bytes saved       : {metrics['bytes_saved_pct']:.1f}%")

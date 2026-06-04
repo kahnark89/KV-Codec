@@ -55,7 +55,7 @@ class CompressedJoint:
             (self.anchors_k.numel() + self.anchors_v.numel()) * 2 +
             (self.residuals_k.numel() + self.residuals_v.numel()) * 1 +
             (self.scales_k.numel() + self.scales_v.numel()) * 4 +
-            (self.layer_anchor_map.numel() + self.pos_anchor_map.numel()) * 4
+            (self.layer_anchor_map.numel() + self.pos_anchor_map.numel()) * 8  # int64
         )
 
     def bytes_original(self) -> int:
@@ -233,6 +233,7 @@ class JointCodec:
             cos_v += F.cosine_similarity(v_o.reshape(-1,D), v_r.reshape(-1,D), dim=-1).mean().item()
             mse_k += F.mse_loss(k_r, k_o).item()
             mse_v += F.mse_loss(v_r, v_o).item()
+        cr = c.compression_ratio()
         return {
             'strategy':            'joint_2d',
             'seq_anchor_stride':   self.cfg.seq_anchor_stride,
@@ -241,7 +242,7 @@ class JointCodec:
             'cosine_sim_v':        cos_v / n,
             'mse_k':               mse_k / n,
             'mse_v':               mse_v / n,
-            'compression_ratio':   c.compression_ratio(),
-            'bytes_saved_pct':     (1 - 1/c.compression_ratio()) * 100,
+            'compression_ratio':   cr,
+            'bytes_saved_pct':     (1 - 1/cr) * 100 if cr > 0 else 0.0,
             'predictor_used':      c.predictor_used,
         }

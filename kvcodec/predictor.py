@@ -328,6 +328,7 @@ class PredictorTrainer:
         k_stack = torch.stack([k.float().to(self.device) for k in keys]).permute(0,2,1,3)
         v_stack = torch.stack([v.float().to(self.device) for v in values]).permute(0,2,1,3)
         loss = torch.tensor(0.0, device=self.device)
+        count = 0
         for al in anchor_layers:
             for ap in anchor_pos:
                 le = min(al + stride_layer, n)
@@ -339,7 +340,10 @@ class PredictorTrainer:
                 pred_k, pred_v = self.predictor.predict_joint(ak, av, dl, dp)
                 loss += (F.mse_loss(pred_k, k_stack[al:le, ap:pe]) +
                          F.mse_loss(pred_v, v_stack[al:le, ap:pe]))
-        return loss
+                count += 1
+        # Average over anchor blocks so the loss scale matches seq/layer modes
+        # (otherwise the effective LR grows with sequence/layer count).
+        return loss / max(count, 1)
 
     def save(self, path: str):
         torch.save({
@@ -347,6 +351,8 @@ class PredictorTrainer:
             'head_dim':   self.predictor.head_dim,
             'hidden_dim': self.predictor.hidden_dim,
             'n_delta_axes': self.predictor.n_delta_axes,
+            'max_delta':  self.predictor.max_delta,
+            'n_sinusoid_freqs': self.predictor.n_sinusoid_freqs,
             'mode':       self.mode,
         }, path)
         if self.verbose:
@@ -359,6 +365,9 @@ class PredictorTrainer:
             head_dim=ckpt['head_dim'],
             hidden_dim=ckpt['hidden_dim'],
             n_delta_axes=ckpt['n_delta_axes'],
+            # Default for checkpoints saved before these were persisted.
+            max_delta=ckpt.get('max_delta', 128),
+            n_sinusoid_freqs=ckpt.get('n_sinusoid_freqs', 16),
         ).to(device)
         p.load_state_dict(ckpt['state_dict'])
         p.eval()
